@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ista Connect",
+        "description": "Podaj dane logowania istaConnect.",
+        "data": {
+          "email": "Email",
+          "password": "Haslo",
+          "update_interval": "Interwal aktualizacji w godzinach"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie mozna polaczyc sie z istaConnect.",
+      "invalid_auth": "Nieprawidlowe dane logowania istaConnect.",
+      "unknown": "Nieoczekiwany blad."
+    },
+    "abort": {
+      "already_configured": "To konto istaConnect jest juz skonfigurowane."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje ista Connect",
+        "data": {
+          "update_interval": "Interwal aktualizacji w godzinach"
+        }
+      }
+    }
+  }
+}

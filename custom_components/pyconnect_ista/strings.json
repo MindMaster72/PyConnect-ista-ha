@@ -1,0 +1,46 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ista Connect",
+        "description": "Enter your istaConnect credentials.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "update_interval": "Update interval in hours"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to istaConnect.",
+      "invalid_auth": "Invalid istaConnect credentials.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This istaConnect account is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ista Connect options",
+        "data": {
+          "update_interval": "Update interval in hours"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "latest_heat": { "name": "Latest heat" },
+      "latest_hot_water": { "name": "Latest hot water" },
+      "latest_cold_water": { "name": "Latest cold water" },
+      "heat_month_points": { "name": "Heat monthly values" },
+      "heat_day_points": { "name": "Heat daily values" },
+      "hot_water_month_points": { "name": "Hot water monthly values" },
+      "hot_water_day_points": { "name": "Hot water daily values" },
+      "cold_water_month_points": { "name": "Cold water monthly values" },
+      "cold_water_day_points": { "name": "Cold water daily values" }
+    }
+  }
+}
