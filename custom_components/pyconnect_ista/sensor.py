@@ -17,6 +17,45 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import ATTRIBUTION, DATA_COORDINATOR, DOMAIN, MANUFACTURER, NAME
 from .coordinator import PyConnectIstaDataUpdateCoordinator
 
+DEVICE_SERIES_META = {
+    "heat_devices_month": {
+        "label": "Ogrzewanie",
+        "period": "miesiac",
+        "unit": None,
+        "device_class": None,
+    },
+    "heat_devices_day": {
+        "label": "Ogrzewanie",
+        "period": "dzien",
+        "unit": None,
+        "device_class": None,
+    },
+    "hot_water_devices_month": {
+        "label": "Ciepla woda",
+        "period": "miesiac",
+        "unit": UnitOfVolume.CUBIC_METERS,
+        "device_class": SensorDeviceClass.WATER,
+    },
+    "hot_water_devices_day": {
+        "label": "Ciepla woda",
+        "period": "dzien",
+        "unit": UnitOfVolume.CUBIC_METERS,
+        "device_class": SensorDeviceClass.WATER,
+    },
+    "cold_water_devices_month": {
+        "label": "Zimna woda",
+        "period": "miesiac",
+        "unit": UnitOfVolume.CUBIC_METERS,
+        "device_class": SensorDeviceClass.WATER,
+    },
+    "cold_water_devices_day": {
+        "label": "Zimna woda",
+        "period": "dzien",
+        "unit": UnitOfVolume.CUBIC_METERS,
+        "device_class": SensorDeviceClass.WATER,
+    },
+}
+
 
 @dataclass(frozen=True, kw_only=True)
 class IstaSensorEntityDescription(SensorEntityDescription):
@@ -106,7 +145,53 @@ async def async_setup_entry(
 ) -> None:
     """Set up ista Connect sensors."""
     coordinator: PyConnectIstaDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id][DATA_COORDINATOR]
-    async_add_entities([IstaConsumptionSensor(coordinator, description) for description in SENSOR_DESCRIPTIONS])
+    entities: list[SensorEntity] = [
+        IstaConsumptionSensor(coordinator, description) for description in SENSOR_DESCRIPTIONS
+    ]
+    entities.extend(_device_sensors(coordinator))
+
+    async_add_entities(entities)
+
+
+def _device_sensors(coordinator: PyConnectIstaDataUpdateCoordinator) -> list[SensorEntity]:
+    """Create per-meter sensors from the API metering points."""
+    device_series = coordinator.data.get("device_series", {})
+    if not isinstance(device_series, dict):
+        return []
+
+    entities: list[SensorEntity] = []
+    for source, meta in DEVICE_SERIES_META.items():
+        series = device_series.get(source)
+        if not isinstance(series, dict):
+            continue
+
+        metering_points = series.get("meteringPoints")
+        if not isinstance(metering_points, list):
+            continue
+
+        for metering_point in metering_points:
+            if not isinstance(metering_point, dict):
+                continue
+            index = metering_point.get("index")
+            serial_number = metering_point.get("serialNumber")
+            if not isinstance(index, int) or not serial_number:
+                continue
+
+            entities.append(
+                IstaDeviceConsumptionSensor(
+                    coordinator=coordinator,
+                    source=source,
+                    index=index,
+                    serial_number=str(serial_number),
+                    device_type=str(metering_point.get("deviceType", "")),
+                    label=str(meta["label"]),
+                    period=str(meta["period"]),
+                    unit=meta["unit"],
+                    device_class=meta["device_class"],
+                )
+            )
+
+    return entities
 
 
 class IstaConsumptionSensor(CoordinatorEntity[PyConnectIstaDataUpdateCoordinator], SensorEntity):
@@ -238,3 +323,114 @@ def _normalize_unit(unit: str) -> str:
     if unit == "DEVICE_UNIT":
         return "device unit"
     return unit
+
+
+class IstaDeviceConsumptionSensor(CoordinatorEntity[PyConnectIstaDataUpdateCoordinator], SensorEntity):
+    """Per-device consumption sensor for ista Connect."""
+
+    _attr_attribution = ATTRIBUTION
+    _attr_has_entity_name = False
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(
+        self,
+        coordinator: PyConnectIstaDataUpdateCoordinator,
+        source: str,
+        index: int,
+        serial_number: str,
+        device_type: str,
+        label: str,
+        period: str,
+        unit: str | None,
+        device_class: SensorDeviceClass | None,
+    ) -> None:
+        """Initialize the per-device sensor."""
+        super().__init__(coordinator)
+        self._source = source
+        self._index = index
+        self._serial_number = serial_number
+        self._device_type = device_type
+        self._attr_name = f"{label} {serial_number} - {period}"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{source}_{serial_number}_{index}"
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{coordinator.config_entry.entry_id}_{serial_number}")},
+            manufacturer=MANUFACTURER,
+            name=f"{NAME} {serial_number}",
+            model=device_type or "istaConnect metering point",
+            via_device=(DOMAIN, coordinator.config_entry.entry_id),
+        )
+
+    @property
+    def native_value(self) -> float | int | None:
+        """Return the latest value for this meter."""
+        point = self._point
+        value = point.get("value") if point else None
+        return value if isinstance(value, (float, int)) else None
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return native unit from API when available."""
+        point = self._point
+        unit = point.get("unit") if point else None
+        if isinstance(unit, str):
+            return _normalize_unit(unit)
+        return self._attr_native_unit_of_measurement
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return meter metadata."""
+        point = self._point
+        attrs: dict[str, Any] = {
+            "serial_number": self._serial_number,
+            "device_type": self._device_type,
+            "meter_index": self._index,
+            "source": self._source,
+        }
+        if not point:
+            return attrs
+
+        attrs.update(
+            {
+                "date": point.get("date"),
+                "ratio": point.get("ratio"),
+                "unit": point.get("unit"),
+                "values_count": point.get("values_count"),
+                "data_series_type": point.get("dataSeriesType"),
+            }
+        )
+        return attrs
+
+    @property
+    def _point(self) -> dict[str, Any] | None:
+        device_series = self.coordinator.data.get("device_series", {})
+        if not isinstance(device_series, dict):
+            return None
+
+        series = device_series.get(self._source)
+        if not isinstance(series, dict):
+            return None
+
+        values = series.get("values")
+        if not isinstance(values, Mapping) or not values:
+            return None
+
+        for date in sorted((str(key) for key in values), reverse=True):
+            day_values = values.get(date)
+            if not isinstance(day_values, list):
+                continue
+            for item in day_values:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("index") == self._index and isinstance(item.get("value"), (float, int)):
+                    return {
+                        "date": date,
+                        "value": item.get("value"),
+                        "ratio": item.get("ratio"),
+                        "unit": series.get("unit"),
+                        "values_count": len(values),
+                        "dataSeriesType": series.get("dataSeriesType"),
+                    }
+
+        return None

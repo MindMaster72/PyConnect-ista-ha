@@ -20,6 +20,15 @@ from .const import CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+DEVICE_SERIES_ENDPOINTS = {
+    "heat_devices_month": "/user/{user_id}/consumption/devices/HEAT/DEVICE_UNIT/MONTH",
+    "heat_devices_day": "/user/{user_id}/consumption/devices/HEAT/DEVICE_UNIT/DAY",
+    "hot_water_devices_month": "/user/{user_id}/consumption/devices/HOT_WATER/M_3/MONTH",
+    "hot_water_devices_day": "/user/{user_id}/consumption/devices/HOT_WATER/M_3/DAY",
+    "cold_water_devices_month": "/user/{user_id}/consumption/devices/COLD_WATER/M_3/MONTH",
+    "cold_water_devices_day": "/user/{user_id}/consumption/devices/COLD_WATER/M_3/DAY",
+}
+
 
 class PyConnectIstaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinate istaConnect data updates."""
@@ -62,6 +71,7 @@ class PyConnectIstaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "cold_water_month": await self.client.cold_water_month(),
                     "cold_water_day": await self.client.cold_water_day(),
                 },
+                "device_series": await self._async_device_series(),
             }
         except IstaConnectException as err:
             raise ConfigEntryAuthFailed("istaConnect authentication failed") from err
@@ -73,3 +83,10 @@ class PyConnectIstaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_close(self) -> None:
         """Close the underlying API client."""
         await self.client.close()
+
+    async def _async_device_series(self) -> dict[str, Any]:
+        """Fetch per-device consumption series."""
+        data: dict[str, Any] = {}
+        for key, endpoint in DEVICE_SERIES_ENDPOINTS.items():
+            data[key] = await self.client._api.get(endpoint.format(user_id=self.client.user_id))
+        return data
