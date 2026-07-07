@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 from pyconnect_ista import IstaConnectClient
-from pyconnect_ista.exceptions import IstaConnectException
+from pyconnect_ista.exceptions import AuthenticationError, IstaConnectException
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
@@ -48,7 +48,10 @@ class PyConnectIstaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_setup(self) -> None:
         """Log in before the first refresh."""
         try:
-            await self.client.login(self.config_entry.data[CONF_EMAIL], self.config_entry.data[CONF_PASSWORD])
+            await self._async_login()
+        except AuthenticationError as err:
+            await self.client.close()
+            raise ConfigEntryAuthFailed("Invalid istaConnect credentials") from err
         except Exception as err:
             await self.client.close()
             raise ConfigEntryNotReady("Could not log in to istaConnect") from err
@@ -56,25 +59,23 @@ class PyConnectIstaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from istaConnect."""
         try:
-            if not self.client.authenticated:
-                await self.client.login(self.config_entry.data[CONF_EMAIL], self.config_entry.data[CONF_PASSWORD])
-
-            return {
-                "user": self.client.user,
-                "user_id": self.client.user_id,
-                "latest": await self.client.latest_consumption(),
-                "series": {
-                    "heat_month": await self.client.heat_month(),
-                    "heat_day": await self.client.heat_day(),
-                    "hot_water_month": await self.client.hot_water_month(),
-                    "hot_water_day": await self.client.hot_water_day(),
-                    "cold_water_month": await self.client.cold_water_month(),
-                    "cold_water_day": await self.client.cold_water_day(),
-                },
-                "device_series": await self._async_device_series(),
-            }
+            return await self._async_fetch_data()
+        except AuthenticationError:
+            _LOGGER.debug("istaConnect session expired; trying a clean login")
+            await self._async_reset_client()
+            try:
+                return await self._async_fetch_data()
+            except AuthenticationError as err:
+                raise ConfigEntryAuthFailed("Invalid istaConnect credentials") from err
+            except IstaConnectException as err:
+                raise UpdateFailed(f"istaConnect rejected the refreshed session: {err}") from err
         except IstaConnectException as err:
-            raise ConfigEntryAuthFailed("istaConnect authentication failed") from err
+            _LOGGER.debug("istaConnect request failed; retrying with a clean session: %s", err)
+            await self._async_reset_client()
+            try:
+                return await self._async_fetch_data()
+            except IstaConnectException as retry_err:
+                raise UpdateFailed(f"Error updating istaConnect data after reconnect: {retry_err}") from retry_err
         except httpx.HTTPError as err:
             raise UpdateFailed(f"Error communicating with istaConnect: {err}") from err
         except Exception as err:
@@ -90,3 +91,32 @@ class PyConnectIstaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for key, endpoint in DEVICE_SERIES_ENDPOINTS.items():
             data[key] = await self.client._api.get(endpoint.format(user_id=self.client.user_id))
         return data
+
+    async def _async_login(self) -> None:
+        """Log in to istaConnect with the config entry credentials."""
+        await self.client.login(self.config_entry.data[CONF_EMAIL], self.config_entry.data[CONF_PASSWORD])
+
+    async def _async_reset_client(self) -> None:
+        """Drop the current client and create a clean session."""
+        await self.client.close()
+        self.client = IstaConnectClient()
+
+    async def _async_fetch_data(self) -> dict[str, Any]:
+        """Fetch all data, logging in first when needed."""
+        if not self.client.authenticated:
+            await self._async_login()
+
+        return {
+            "user": self.client.user,
+            "user_id": self.client.user_id,
+            "latest": await self.client.latest_consumption(),
+            "series": {
+                "heat_month": await self.client.heat_month(),
+                "heat_day": await self.client.heat_day(),
+                "hot_water_month": await self.client.hot_water_month(),
+                "hot_water_day": await self.client.hot_water_day(),
+                "cold_water_month": await self.client.cold_water_month(),
+                "cold_water_day": await self.client.cold_water_day(),
+            },
+            "device_series": await self._async_device_series(),
+        }
