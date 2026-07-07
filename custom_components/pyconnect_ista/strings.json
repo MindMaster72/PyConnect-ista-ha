@@ -32,15 +32,15 @@
   },
   "entity": {
     "sensor": {
-      "latest_heat": { "name": "Latest heat" },
-      "latest_hot_water": { "name": "Latest hot water" },
-      "latest_cold_water": { "name": "Latest cold water" },
-      "heat_month_points": { "name": "Heat monthly values" },
-      "heat_day_points": { "name": "Heat daily values" },
-      "hot_water_month_points": { "name": "Hot water monthly values" },
-      "hot_water_day_points": { "name": "Hot water daily values" },
-      "cold_water_month_points": { "name": "Cold water monthly values" },
-      "cold_water_day_points": { "name": "Cold water daily values" }
+      "latest_heat": { "name": "Heat latest reading" },
+      "latest_hot_water": { "name": "Hot water latest reading" },
+      "latest_cold_water": { "name": "Cold water latest reading" },
+      "heat_month_points": { "name": "Heat monthly reading" },
+      "heat_day_points": { "name": "Heat daily reading" },
+      "hot_water_month_points": { "name": "Hot water monthly reading" },
+      "hot_water_day_points": { "name": "Hot water daily reading" },
+      "cold_water_month_points": { "name": "Cold water monthly reading" },
+      "cold_water_day_points": { "name": "Cold water daily reading" }
     }
   }
 }
