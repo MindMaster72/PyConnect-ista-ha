@@ -66,7 +66,7 @@ class PyConnectIstaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 return await self._async_fetch_data()
             except AuthenticationError as err:
-                raise ConfigEntryAuthFailed("Invalid istaConnect credentials") from err
+                raise UpdateFailed(f"istaConnect authentication retry failed: {err}") from err
             except IstaConnectException as err:
                 raise UpdateFailed(f"istaConnect rejected the refreshed session: {err}") from err
         except IstaConnectException as err:
