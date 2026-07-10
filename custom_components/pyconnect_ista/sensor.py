@@ -246,6 +246,8 @@ class IstaConsumptionSensor(CoordinatorEntity[PyConnectIstaDataUpdateCoordinator
             "source": self.entity_description.source,
         }
 
+        if _is_daily_source(self.entity_description.source):
+            attrs["last_reading_date"] = point.get("date")
         if value_type := point.get("valueType"):
             attrs["value_type"] = value_type
         if count := point.get("values_count"):
@@ -325,6 +327,11 @@ def _normalize_unit(unit: str) -> str:
     return unit
 
 
+def _is_daily_source(source: str) -> bool:
+    """Return whether a source contains daily readings."""
+    return source.endswith("_day")
+
+
 class IstaDeviceConsumptionSensor(CoordinatorEntity[PyConnectIstaDataUpdateCoordinator], SensorEntity):
     """Per-device consumption sensor for ista Connect."""
 
@@ -400,6 +407,8 @@ class IstaDeviceConsumptionSensor(CoordinatorEntity[PyConnectIstaDataUpdateCoord
                 "data_series_type": point.get("dataSeriesType"),
             }
         )
+        if _is_daily_source(self._source):
+            attrs["last_reading_date"] = point.get("date")
         return attrs
 
     @property
