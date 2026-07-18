@@ -56,6 +56,29 @@ DEVICE_SERIES_META = {
     },
 }
 
+DAILY_TREND_DAYS = 14
+
+DAILY_TREND_META = {
+    "heat_day": {
+        "key": "heat_14_days",
+        "name": "Ogrzewanie - ostatnie 14 dni",
+        "unit": None,
+        "device_class": None,
+    },
+    "hot_water_day": {
+        "key": "hot_water_14_days",
+        "name": "Ciepla woda - ostatnie 14 dni",
+        "unit": UnitOfVolume.CUBIC_METERS,
+        "device_class": SensorDeviceClass.WATER,
+    },
+    "cold_water_day": {
+        "key": "cold_water_14_days",
+        "name": "Zimna woda - ostatnie 14 dni",
+        "unit": UnitOfVolume.CUBIC_METERS,
+        "device_class": SensorDeviceClass.WATER,
+    },
+}
+
 
 @dataclass(frozen=True, kw_only=True)
 class IstaSensorEntityDescription(SensorEntityDescription):
@@ -148,9 +171,25 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         IstaConsumptionSensor(coordinator, description) for description in SENSOR_DESCRIPTIONS
     ]
+    entities.extend(_daily_trend_sensors(coordinator))
     entities.extend(_device_sensors(coordinator))
 
     async_add_entities(entities)
+
+
+def _daily_trend_sensors(coordinator: PyConnectIstaDataUpdateCoordinator) -> list[SensorEntity]:
+    """Create aggregate daily trend sensors for charts."""
+    return [
+        IstaDailyTrendSensor(
+            coordinator=coordinator,
+            source=source,
+            key=str(meta["key"]),
+            name=str(meta["name"]),
+            unit=meta["unit"],
+            device_class=meta["device_class"],
+        )
+        for source, meta in DAILY_TREND_META.items()
+    ]
 
 
 def _device_sensors(coordinator: PyConnectIstaDataUpdateCoordinator) -> list[SensorEntity]:
@@ -330,6 +369,110 @@ def _normalize_unit(unit: str) -> str:
 def _is_daily_source(source: str) -> bool:
     """Return whether a source contains daily readings."""
     return source.endswith("_day")
+
+
+class IstaDailyTrendSensor(CoordinatorEntity[PyConnectIstaDataUpdateCoordinator], SensorEntity):
+    """Daily aggregate trend sensor for the last days."""
+
+    _attr_attribution = ATTRIBUTION
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(
+        self,
+        coordinator: PyConnectIstaDataUpdateCoordinator,
+        source: str,
+        key: str,
+        name: str,
+        unit: str | None,
+        device_class: SensorDeviceClass | None,
+    ) -> None:
+        """Initialize the trend sensor."""
+        super().__init__(coordinator)
+        self._source = source
+        self._attr_name = name
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{key}"
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, coordinator.config_entry.entry_id)},
+            manufacturer=MANUFACTURER,
+            name=NAME,
+            model="istaConnect cloud account",
+        )
+
+    @property
+    def native_value(self) -> float | int | None:
+        """Return the newest daily value."""
+        points = self._points
+        if not points:
+            return None
+        value = points[-1].get("value")
+        return value if isinstance(value, (float, int)) else None
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return native unit from API when available."""
+        series = self._series
+        unit = series.get("unit") if series else None
+        if isinstance(unit, str):
+            return _normalize_unit(unit)
+        return self._attr_native_unit_of_measurement
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return chart-ready daily values."""
+        points = self._points
+        attrs: dict[str, Any] = {
+            "source": self._source,
+            "days": DAILY_TREND_DAYS,
+            "chart_type": "line",
+            "dates": [point["date"] for point in points],
+            "values": [point["value"] for point in points],
+            "series": points,
+        }
+        if points:
+            attrs["last_reading_date"] = points[-1]["date"]
+
+        series = self._series
+        if series:
+            values = series.get("values")
+            attrs["unit"] = series.get("unit")
+            attrs["values_count"] = len(values) if isinstance(values, list) else 0
+            attrs["data_series_type"] = series.get("dataSeriesType")
+
+        return attrs
+
+    @property
+    def _series(self) -> dict[str, Any] | None:
+        series_data = self.coordinator.data.get("series", {})
+        if not isinstance(series_data, dict):
+            return None
+
+        series = series_data.get(self._source)
+        return series if isinstance(series, dict) else None
+
+    @property
+    def _points(self) -> list[dict[str, float | int | str]]:
+        series = self._series
+        if not series:
+            return []
+
+        values = series.get("values")
+        if not isinstance(values, list):
+            return []
+
+        points = [
+            {
+                "date": str(point.get("date")),
+                "value": point["value"],
+            }
+            for point in values
+            if isinstance(point, dict)
+            and point.get("date") is not None
+            and isinstance(point.get("value"), (float, int))
+        ]
+        return sorted(points, key=lambda point: str(point["date"]))[-DAILY_TREND_DAYS:]
 
 
 class IstaDeviceConsumptionSensor(CoordinatorEntity[PyConnectIstaDataUpdateCoordinator], SensorEntity):
